@@ -1,0 +1,20 @@
+/* styles.css */
+.st-rewind-button {
+    /* Try to match the styling of other buttons/items in Silly Tavern's action menu */
+    background: none;
+    border: none;
+    color: inherit; /* Or a specific color from ST's theme */
+    padding: 8px 10px; /* Adjust as needed */
+    margin: 0;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    font-size: inherit; /* Match menu item font size */
+}
+
+.st-rewind-button:hover {
+    background-color: rgba(0, 0, 0, 0.1); /* Or ST's hover color */
+}
+
+/* If your button is in an <li>, you might style the <li> instead/as well */
+/* e.g. .actions-menu > li > .st-rewind-button */
