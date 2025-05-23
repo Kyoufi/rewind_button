@@ -1,100 +1,73 @@
-// --- CONFIGURATION: These selectors MUST be updated ---
-// You'll need to inspect Silly Tavern's HTML to find the right ones.
-const MESSAGE_CONTAINER_SELECTOR = '#chat'; // The main container holding all messages
-const MESSAGE_SELECTOR = '.message-class'; // Selector for an individual message bubble/container
-const MORE_ACTIONS_BUTTON_SELECTOR = '.message-actions .options-button'; // The '...' button itself
-const ACTIONS_MENU_SELECTOR = '.message-options-dropdown'; // The menu that appears after '...' is clicked
-// --- END CONFIGURATION ---
+(function () {
+    const EXT_NAME = 'Rewind Extension';
 
-function addRewindFunctionalityToMessage(messageElement) {
-    const moreActionsButton = messageElement.querySelector(MORE_ACTIONS_BUTTON_SELECTOR);
-
-    if (moreActionsButton && !messageElement.dataset.rewindButtonAdded) {
-        moreActionsButton.addEventListener('click', () => {
-            // The actions menu might be dynamically created/populated.
-            // We need to wait for it to appear before adding our button.
-            // A robust way is MutationObserver, a simpler way is setTimeout.
-            setTimeout(() => {
-                // Try to find the menu. It might be a global one, or specific to the message.
-                // This selector might need to be very specific, or you might need to navigate from moreActionsButton.
-                const actionsMenu = document.querySelector(ACTIONS_MENU_SELECTOR); // Or messageElement.querySelector(...)
-
-                if (actionsMenu && !actionsMenu.querySelector('.st-rewind-button')) {
-                    const rewindButtonListItem = document.createElement('li'); // Assuming it's a list menu
-                    const rewindButton = document.createElement('button');
-                    rewindButton.textContent = 'Rewind from here';
-                    rewindButton.classList.add('st-rewind-button'); // For styling and identification
-
-                    rewindButton.addEventListener('click', (event) => {
-                        event.stopPropagation(); // Prevent menu from closing or other side effects
-                        event.preventDefault();
-
-                        if (confirm('Are you sure? All messages below this one will be permanently removed from view.')) {
-                            let currentMessage = messageElement;
-                            let nextSibling = currentMessage.nextElementSibling;
-
-                            while (nextSibling) {
-                                // Important: Only remove actual messages if other elements might be siblings.
-                                // If all siblings are messages, this check can be simpler.
-                                if (nextSibling.matches(MESSAGE_SELECTOR)) {
-                                    const toRemove = nextSibling;
-                                    nextSibling = nextSibling.nextElementSibling;
-                                    toRemove.remove();
-                                } else {
-                                    nextSibling = nextSibling.nextElementSibling; // Skip non-message siblings
-                                }
-                            }
-
-                            // Optionally, try to close the actions menu
-                            // This depends on how ST's menu works.
-                            // e.g., actionsMenu.style.display = 'none'; or actionsMenu.classList.remove('active');
-                            // Or if it's a component, it might have a hide() method.
-                            // For now, the user can click away to close it.
-                        }
-                    });
-
-                    rewindButtonListItem.appendChild(rewindButton);
-                    actionsMenu.appendChild(rewindButtonListItem);
+    function waitFor(selector, timeout = 10000) {
+        return new Promise((resolve, reject) => {
+            const interval = setInterval(() => {
+                const el = document.querySelector(selector);
+                if (el) {
+                    clearInterval(interval);
+                    resolve(el);
                 }
-            }, 100); // Adjust delay as needed, or implement MutationObserver for the menu
+            }, 100);
+            setTimeout(() => {
+                clearInterval(interval);
+                reject(new Error(`Timeout waiting for ${selector}`));
+            }, timeout);
         });
-        messageElement.dataset.rewindButtonAdded = 'true'; // Mark so we don't add multiple listeners
-    }
-}
-
-// Process existing messages on page load
-function initialScan() {
-    document.querySelectorAll(MESSAGE_SELECTOR).forEach(addRewindFunctionalityToMessage);
-}
-
-// Use MutationObserver to detect new messages being added to the chat
-function observeNewMessages() {
-    const chatContainer = document.querySelector(MESSAGE_CONTAINER_SELECTOR);
-    if (!chatContainer) {
-        console.warn('Silly Tavern Rewind: Chat container not found. New messages might not get the rewind button.');
-        return;
     }
 
-    const observer = new MutationObserver((mutationsList) => {
-        for (const mutation of mutationsList) {
-            if (mutation.type === 'childList') {
-                mutation.addedNodes.forEach(node => {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        // If the added node is a message itself
-                        if (node.matches(MESSAGE_SELECTOR)) {
-                            addRewindFunctionalityToMessage(node);
-                        }
-                        // If messages are added inside another container
-                        node.querySelectorAll(MESSAGE_SELECTOR).forEach(addRewindFunctionalityToMessage);
-                    }
-});
+    function addRewindButtonToMessage(messageEl, index) {
+        const menu = messageEl.querySelector('.dropdown-menu');
+        if (!menu || messageEl.dataset.rewindAdded === 'true') return;
+
+        const separator = document.createElement('hr');
+        const menuItem = document.createElement('div');
+        menuItem.className = 'dropdown-item';
+        menuItem.textContent = '🕑 Rewind here';
+        menuItem.style.cursor = 'pointer';
+
+        menuItem.addEventListener('click', () => {
+            if (!confirm('Delete all messages after this one?')) return;
+
+            // Remove all messages after this one
+            if (Array.isArray(chat) && index < chat.length) {
+                chat.splice(index + 1);
+                saveChat();
+                printMessages();
             }
+        });
+
+        menu.appendChild(separator);
+        menu.appendChild(menuItem);
+        messageEl.dataset.rewindAdded = 'true';
+    }
+
+    function hookAllMessages() {
+        document.querySelectorAll('.mes').forEach((messageEl, index) => {
+            addRewindButtonToMessage(messageEl, index);
+        });
+    }
+
+    function observeMessages() {
+        const chatContainer = document.getElementById('chat');
+        if (!chatContainer) return;
+
+        const observer = new MutationObserver(hookAllMessages);
+        observer.observe(chatContainer, { childList: true, subtree: true });
+
+        hookAllMessages();
+        console.log(`[${EXT_NAME}] Initialized`);
+    }
+
+    async function init() {
+        try {
+            await waitFor('#chat');
+            observeMessages();
+        } catch (err) {
+            console.error(`[${EXT_NAME}] Init failed:`, err);
         }
-    });
+    }
 
-    observer.observe(chatContainer, { childList: true, subtree: true });
-}
-
-// Start the process
-initialScan();
-observeNewMessages();
+    init();
+})();
