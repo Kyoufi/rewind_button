@@ -1,297 +1,315 @@
+// ==UserScript==
+// @name         SillyTavern Rewind Extension
+// @namespace    http://tampermonkey.net/
+// @version      1.1
+// @description  Adds a rewind button to message quick actions in SillyTavern to delete subsequent messages.
+// @author       YourName
+// @match        */* (Adjust if you know the specific SillyTavern URL pattern)
+// @grant        none
+// ==/UserScript==
+
 (function() {
     'use strict';
 
     // --- Configuration ---
-    const REWIND_BUTTON_ICON_CLASS = 'fa-solid fa-rotate-left'; // Font Awesome icon class
-    const REWIND_BUTTON_TEXT = 'Rewind'; // Text next to the icon
-    const REWIND_BUTTON_TOOLTIP = 'Rewind chat to this message (deletes all messages below)';
-    const CUSTOM_BUTTON_CLASS = 'st-rewind-button'; // Custom class for easier selection/styling
+    // Adjust these selectors if SillyTavern's structure is different.
+    // This is a common selector for individual chat messages.
+    const MESSAGE_SELECTOR = '.mes';
+    // This selector should target the container of the "..." quick actions menu for a message.
+    // It might be inside the MESSAGE_SELECTOR element.
+    const QUICK_ACTIONS_MENU_SELECTOR = '.message-tools .dropdown-menu'; // Example, adjust as needed
+    const MORE_ACTIONS_BUTTON_SELECTOR = '.message-tools .fa-ellipsis-h'; // Example for the "..." button
 
-    // --- Helper: Display Status/Notification ---
-    // This is a basic notification. Ideally, integrate with SillyTavern's toast/notification system if available.
-    function displayNotification(message, type = 'info', duration = 4000) {
-        console.log(`[RewindExt] ${type.toUpperCase()}: ${message}`);
-        let notificationBox = document.getElementById('rewind-ext-notification-box');
-        if (!notificationBox) {
-            notificationBox = document.createElement('div');
-            notificationBox.id = 'rewind-ext-notification-box';
-            Object.assign(notificationBox.style, {
-                position: 'fixed',
-                bottom: '20px',
-                right: '20px',
-                padding: '12px 18px',
-                borderRadius: '6px',
-                zIndex: '10001', // High z-index
-                fontSize: '14px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                transition: 'opacity 0.5s, transform 0.5s',
-                opacity: '0',
-                transform: 'translateY(20px)'
+    // --- Modal for Confirmation ---
+    let confirmationModal = null;
+    let modalResolve = null;
+
+    function createConfirmationModal() {
+        if (document.getElementById('rewind-confirmation-modal')) {
+            return document.getElementById('rewind-confirmation-modal');
+        }
+
+        const modal = document.createElement('div');
+        modal.id = 'rewind-confirmation-modal';
+        modal.style.display = 'none'; // Hidden by default
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4'; // Tailwind classes for styling
+
+        modal.innerHTML = `
+            <div class="bg-gray-800 p-6 rounded-lg shadow-xl max-w-sm w-full text-white">
+                <h3 class="text-lg font-semibold mb-4">Confirm Rewind</h3>
+                <p class="mb-6">Are you sure you want to remove all messages below this point? This action cannot be undone directly.</p>
+                <div class="flex justify-end space-x-3">
+                    <button id="rewind-cancel" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md text-sm font-medium">Cancel</button>
+                    <button id="rewind-confirm" class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-md text-sm font-medium">Confirm Rewind</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.querySelector('#rewind-confirm').addEventListener('click', () => {
+            if (modalResolve) modalResolve(true);
+            modal.style.display = 'none';
+        });
+
+        modal.querySelector('#rewind-cancel').addEventListener('click', () => {
+            if (modalResolve) modalResolve(false);
+            modal.style.display = 'none';
+        });
+        return modal;
+    }
+
+    async function showConfirmationDialog() {
+        if (!confirmationModal) {
+            confirmationModal = createConfirmationModal();
+        }
+        confirmationModal.style.display = 'flex';
+        return new Promise(resolve => {
+            modalResolve = resolve;
+        });
+    }
+
+    // --- Rewind Logic ---
+    async function rewindMessages(targetMessageElement) {
+        console.log('[RewindExtension] Rewind initiated for message:', targetMessageElement);
+
+        const confirmed = await showConfirmationDialog();
+        if (!confirmed) {
+            console.log('[RewindExtension] Rewind cancelled by user.');
+            return;
+        }
+
+        console.log('[RewindExtension] Rewind confirmed.');
+
+        let currentElement = targetMessageElement.nextElementSibling;
+        const messagesToRemove = [];
+
+        // Collect all subsequent sibling messages
+        while (currentElement) {
+            // Ensure we are only targeting message elements if there are other siblings
+            if (currentElement.matches(MESSAGE_SELECTOR)) {
+                messagesToRemove.push(currentElement);
+            }
+            currentElement = currentElement.nextElementSibling;
+        }
+
+        if (messagesToRemove.length === 0) {
+            console.log('[RewindExtension] No messages found below the target message.');
+            // You might want to show a notification to the user here.
+            const noMessagesModal = document.createElement('div');
+            noMessagesModal.className = 'fixed top-5 right-5 bg-blue-500 text-white p-3 rounded-lg shadow-md z-50';
+            noMessagesModal.textContent = 'No messages below to rewind.';
+            document.body.appendChild(noMessagesModal);
+            setTimeout(() => {
+                noMessagesModal.remove();
+            }, 3000);
+            return;
+        }
+
+        console.log(`[RewindExtension] Found ${messagesToRemove.length} messages to remove.`);
+
+        // Remove messages from the DOM
+        messagesToRemove.forEach(msg => {
+            console.log('[RewindExtension] Removing message:', msg);
+            msg.remove();
+        });
+
+        // IMPORTANT: SillyTavern specific chat update
+        // After removing messages from the DOM, you VERY LIKELY need to update
+        // SillyTavern's internal chat history array.
+        // This usually involves finding the index of `targetMessageElement` in an array
+        // like `chat` or `main_chat` and then splicing the array.
+        // For example (this is PSEUDOCODE, you'll need to find the actual variables/functions):
+        /*
+        if (typeof chat !== 'undefined' && Array.isArray(chat)) {
+            const messageId = targetMessageElement.dataset.messageId; // Assuming messages have a data-message-id
+            let targetIndex = -1;
+            // Find the index based on a unique ID or by comparing the element itself if objects are stored.
+            // This part is highly dependent on how SillyTavern stores its chat messages.
+            // Let's assume `chat` stores objects that might have an `element` property or an `id`.
+            // A more robust way is to find the message index based on its swipe_id or some other unique identifier.
+            // For simplicity, if SillyTavern's `chat` array directly corresponds to DOM elements order:
+            const allMessages = Array.from(targetMessageElement.parentElement.querySelectorAll(MESSAGE_SELECTOR));
+            const targetDomIndex = allMessages.indexOf(targetMessageElement);
+
+            if (targetDomIndex !== -1 && targetDomIndex < chat.length) {
+                 // Remove all messages from the chat array after the target message's index
+                 chat.splice(targetDomIndex + 1);
+                 console.log('[RewindExtension] Spliced internal chat array.');
+
+                 // You might need to trigger a save or UI update
+                 // if (typeof saveChat === 'function') saveChat();
+                 // if (typeof updateChat === 'function') updateChat(); // Or similar function to refresh UI if needed
+            } else {
+                console.warn('[RewindExtension] Could not find target message in internal chat array or index out of bounds.');
+            }
+        } else {
+            console.warn('[RewindExtension] Internal chat array (e.g., `chat`) not found or not an array. DOM was modified, but internal state might be inconsistent.');
+        }
+        */
+        // The above block is crucial. Without updating the internal chat representation,
+        // SillyTavern might behave unexpectedly or re-add the messages on next interaction.
+        // You'll need to investigate how SillyTavern manages its chat data.
+        // Common variables are `chat`, `main_chat`, `get_chat_massages()`, etc.
+
+        console.log('[RewindExtension] Rewind complete. DOM updated.');
+
+        // Show a success message
+        const successModal = document.createElement('div');
+        successModal.className = 'fixed top-5 right-5 bg-green-500 text-white p-3 rounded-lg shadow-md z-50';
+        successModal.textContent = 'Rewind successful!';
+        document.body.appendChild(successModal);
+        setTimeout(() => {
+            successModal.remove();
+        }, 3000);
+    }
+
+    // --- Add Rewind Button to Message Actions ---
+    function addRewindButton(messageElement) {
+        // Find the "..." button or the menu it reveals
+        // This part is highly dependent on SillyTavern's DOM structure.
+        // We're looking for the dropdown menu that appears when you click "..."
+        let menu = messageElement.querySelector(QUICK_ACTIONS_MENU_SELECTOR);
+
+        // If the menu doesn't exist directly, it might be generated upon clicking the "..." button.
+        // This script assumes the menu is either present or will be populated.
+        // A more robust solution would be to also observe clicks on MORE_ACTIONS_BUTTON_SELECTOR
+        // and then add the button, but that adds complexity.
+
+        if (!menu) {
+            // Attempt to find a "..." button and assume the menu is its sibling or child container
+            const moreButton = messageElement.querySelector(MORE_ACTIONS_BUTTON_SELECTOR);
+            if (moreButton) {
+                // This is a guess. The menu might be a sibling, or a child of a sibling.
+                // You might need to inspect SillyTavern's DOM to find the exact relationship.
+                let potentialMenu = moreButton.closest('.message-tools')?.querySelector('.dropdown-menu');
+                if (potentialMenu) {
+                    menu = potentialMenu;
+                } else {
+                     // Fallback: create a simple container if one isn't found easily.
+                     // This is less ideal as it might not match ST styling perfectly.
+                    const toolsContainer = messageElement.querySelector('.message-tools');
+                    if (toolsContainer) {
+                        menu = document.createElement('div');
+                        menu.className = 'dropdown-menu absolute bg-gray-700 rounded-md shadow-lg py-1 z-20'; // Basic styling
+                        // Position it near the "..." button - this needs refinement
+                        menu.style.top = '100%';
+                        menu.style.right = '0';
+                        menu.style.display = 'none'; // Hidden initially
+                        toolsContainer.style.position = 'relative'; // For absolute positioning of menu
+                        toolsContainer.appendChild(menu);
+
+                        // Show/hide logic for this created menu
+                        moreButton.addEventListener('click', (event) => {
+                            event.stopPropagation();
+                            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+                        });
+                        document.addEventListener('click', (e) => {
+                            if (!toolsContainer.contains(e.target)) {
+                                menu.style.display = 'none';
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+
+        if (menu) {
+            // Check if button already exists
+            if (menu.querySelector('.rewind-button')) {
+                return;
+            }
+
+            const rewindButton = document.createElement('button');
+            rewindButton.innerHTML = '<i class="fas fa-history"></i> Rewind'; // Using Font Awesome icon, ensure it's available
+            rewindButton.className = 'rewind-button block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600 hover:text-white rounded-md'; // Tailwind classes
+            rewindButton.style.cursor = 'pointer';
+
+            rewindButton.addEventListener('click', (event) => {
+                event.stopPropagation(); // Prevent menu from closing if it's a dropdown
+                rewindMessages(messageElement);
+                // Hide the menu after action
+                if (menu.style.display !== 'none' && menu.closest('.dropdown-menu')) { // Check if it's part of a dropdown
+                     menu.style.display = 'none';
+                } else if (menu.style.display !== 'none') { // Generic hide for custom created menu
+                     menu.style.display = 'none';
+                }
             });
-            document.body.appendChild(notificationBox);
-        }
 
-        notificationBox.textContent = message;
-        switch (type) {
-            case 'success':
-                notificationBox.style.backgroundColor = '#e6fffa'; // Light green
-                notificationBox.style.color = '#007a5a';
-                notificationBox.style.borderLeft = '4px solid #00c853';
-                break;
-            case 'error':
-                notificationBox.style.backgroundColor = '#ffebee'; // Light red
-                notificationBox.style.color = '#c62828';
-                notificationBox.style.borderLeft = '4px solid #e53935';
-                break;
-            default: // info
-                notificationBox.style.backgroundColor = '#e3f2fd'; // Light blue
-                notificationBox.style.color = '#1565c0';
-                notificationBox.style.borderLeft = '4px solid #2196f3';
-                break;
-        }
-
-        // Animate in
-        requestAnimationFrame(() => {
-            notificationBox.style.opacity = '1';
-            notificationBox.style.transform = 'translateY(0)';
-        });
-
-        // Clear previous timeout if any
-        if (notificationBox.currentTimeout) {
-            clearTimeout(notificationBox.currentTimeout);
-        }
-
-        notificationBox.currentTimeout = setTimeout(() => {
-            notificationBox.style.opacity = '0';
-            notificationBox.style.transform = 'translateY(20px)';
-            // Optional: remove after fade out if not reusing element often
-            // setTimeout(() => { if(notificationBox.style.opacity === '0') notificationBox.remove(); }, 500);
-        }, duration);
-    }
-
-
-    // --- Core Rewind Logic ---
-    async function handleRewindClick(event) {
-        event.stopPropagation(); // Prevent other click events on the message
-        const button = event.currentTarget;
-        const messageBlock = button.closest('.mes'); // .mes is the standard class for message blocks in ST
-
-        if (!messageBlock) {
-            console.error('[RewindExt] Could not find parent message block.');
-            displayNotification('Error: Could not identify message for rewind.', 'error');
-            return;
-        }
-
-        const messageIdString = messageBlock.getAttribute('mesid'); // 'mesid' usually stores the index in the `chat` array
-        if (messageIdString === null) {
-            console.error('[RewindExt] Message block is missing the "mesid" attribute.');
-            displayNotification('Error: Message ID attribute not found.', 'error');
-            return;
-        }
-        const targetChatIndex = parseInt(messageIdString);
-
-        // Validate core SillyTavern variables/functions
-        if (typeof chat === 'undefined' || !Array.isArray(chat)) {
-            console.error('[RewindExt] Global `chat` array is not available or not an array.');
-            displayNotification('Error: Chat data is not accessible.', 'error');
-            return;
-        }
-        if (typeof deleteMessage !== 'function') {
-            console.error('[RewindExt] Global `deleteMessage` function is not available.');
-            displayNotification('Error: Message deletion function is not accessible.', 'error');
-            return;
-        }
-        if (typeof saveChat !== 'function') {
-            console.error('[RewindExt] Global `saveChat` function is not available.');
-            displayNotification('Error: Chat saving function is not accessible.', 'error');
-            return;
-        }
-
-        if (isNaN(targetChatIndex) || targetChatIndex < 0 || targetChatIndex >= chat.length) {
-            console.error('[RewindExt] Invalid message index:', targetChatIndex, 'Chat length:', chat.length);
-            displayNotification('Error: Invalid message index for rewind.', 'error');
-            return;
-        }
-
-        const messagesToDeleteCount = chat.length - (targetChatIndex + 1);
-
-        if (messagesToDeleteCount <= 0) {
-            displayNotification('This is the last message, or there are no messages below it to rewind.', 'info');
-            return;
-        }
-
-        // Confirmation Dialog
-        if (!confirm(`Are you sure you want to rewind to this point?\n\nThis will permanently delete ${messagesToDeleteCount} message(s) below the selected message. The selected message will remain.`)) {
-            return; // User cancelled
-        }
-
-        console.log(`[RewindExt] User confirmed. Rewinding chat. Target index: ${targetChatIndex}. Messages to delete: ${messagesToDeleteCount}`);
-        button.disabled = true;
-        const originalButtonContent = button.innerHTML;
-        button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Rewinding...`;
-
-        try {
-            let successfullyDeletedCount = 0;
-            // Delete messages from the end of the chat array backwards, down to the one AFTER the targetChatIndex
-            for (let i = chat.length - 1; i > targetChatIndex; i--) {
-                // `deleteMessage(index_in_chat_array, silent_boolean, force_this_swipe_deletion_boolean)`
-                // This function should handle removing from `chat` array and updating the DOM.
-                await deleteMessage(i, true, true); // silent = true, force = true
-                successfullyDeletedCount++;
+            // Add a separator if there are other items
+            if (menu.children.length > 0) {
+                const separator = document.createElement('div');
+                separator.className = 'my-1 h-px bg-gray-600'; // Tailwind for separator
+                menu.appendChild(separator);
             }
+            menu.appendChild(rewindButton);
+            // console.log('[RewindExtension] Rewind button added to:', messageElement);
 
-            // After all deletions, save the chat state
-            await saveChat();
-
-            displayNotification(`${successfullyDeletedCount} message(s) deleted. Chat successfully rewound.`, 'success');
-            console.log(`[RewindExt] ${successfullyDeletedCount} message(s) deleted successfully.`);
-
-            // The UI should ideally update automatically after `deleteMessage` and `saveChat`.
-            // If not, a manual re-render might be needed, e.g., by calling a function like `printMessages()` or `constructChat()`.
-            // This depends heavily on the specific SillyTavern version.
-
-        } catch (error) {
-            console.error('[RewindExt] Error during rewind operation:', error);
-            displayNotification(`Error during rewind: ${error.message}`, 'error');
-        } finally {
-            // Re-enable button if it still exists in the DOM
-            if (button && document.body.contains(button)) {
-                button.disabled = false;
-                button.innerHTML = originalButtonContent;
-            }
+        } else {
+            // console.warn('[RewindExtension] Quick actions menu not found for message:', messageElement, 'Selector used:', QUICK_ACTIONS_MENU_SELECTOR);
         }
     }
 
-    // --- Button Creation and Injection ---
-    function addRewindButtonToMessage(messageElement) {
-        // `mes_buttons` is a common container for action buttons on a message.
-        let actionsContainer = messageElement.querySelector('.mes_buttons');
+    // --- Observe DOM for new messages ---
+    // This is crucial for applying the button to dynamically loaded messages.
+    function observeMessages() {
+        const chatContainer = document.body; // Observe the whole body or a more specific chat container if known
+                                          // e.g., document.getElementById('chat') or document.querySelector('.chat-container')
 
-        if (!actionsContainer) {
-            // If .mes_buttons doesn't exist, some ST versions might place buttons elsewhere or not have this container.
-            // As a fallback, we could try to create it or append to another known element,
-            // but it's safer to skip if the standard structure isn't found.
-            // console.warn('[RewindExt] .mes_buttons container not found in message:', messageElement);
-            return;
-        }
-
-        // Prevent adding duplicate buttons
-        if (actionsContainer.querySelector(`.${CUSTOM_BUTTON_CLASS}`)) {
-            return;
-        }
-
-        const rewindButton = document.createElement('div'); // ST action buttons are often divs styled as buttons
-        rewindButton.className = `mes_button ${CUSTOM_BUTTON_CLASS}`; // Use ST's base button style + custom class
-        rewindButton.title = REWIND_BUTTON_TOOLTIP;
-
-        // Set button content (icon + text)
-        rewindButton.innerHTML = `<i class="${REWIND_BUTTON_ICON_CLASS}"></i> ${REWIND_BUTTON_TEXT}`;
-
-        rewindButton.addEventListener('click', handleRewindClick);
-
-        // Append the new button to the actions container
-        actionsContainer.appendChild(rewindButton);
-    }
-
-    // --- Process Existing and New Messages ---
-    function processAllMessages() {
-        const messageElements = document.querySelectorAll('#chat .mes'); // #chat is the main chat container
-        messageElements.forEach(msgElement => {
-            // Ensure it's a message that should have actions (e.g., has a 'mesid')
-            if (msgElement.getAttribute('mesid') !== null) {
-                addRewindButtonToMessage(msgElement);
-            }
-        });
-    }
-
-    // Observe for new messages being added to the chat
-    function observeChatContainer() {
-        const chatContainer = document.getElementById('chat');
         if (!chatContainer) {
-            console.error('[RewindExt] Chat container #chat not found. Extension cannot monitor new messages.');
-            displayNotification('Error: Chat container not found. Rewind extension may not work correctly for new messages.', 'error');
+            console.error('[RewindExtension] Chat container not found. Extension cannot run.');
             return;
         }
 
         const observer = new MutationObserver(mutations => {
             mutations.forEach(mutation => {
-                if (mutation.addedNodes && mutation.addedNodes.length > 0) {
-                    mutation.addedNodes.forEach(node => {
-                        // Check if the added node itself is a message
-                        if (node.nodeType === Node.ELEMENT_NODE && node.matches && node.matches('.mes') && node.getAttribute('mesid') !== null) {
-                            addRewindButtonToMessage(node);
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        // If the added node is a message itself
+                        if (node.matches(MESSAGE_SELECTOR)) {
+                            addRewindButton(node);
                         }
-                        // Also check if the added node contains messages (e.g., a batch of messages loaded)
-                        else if (node.nodeType === Node.ELEMENT_NODE && node.querySelectorAll) {
-                            node.querySelectorAll('.mes').forEach(childMsg => {
-                                if (childMsg.getAttribute('mesid') !== null) {
-                                    addRewindButtonToMessage(childMsg);
-                                }
-                            });
+                        // If messages are added in a batch, or if the node contains messages
+                        node.querySelectorAll(MESSAGE_SELECTOR).forEach(addRewindButton);
+
+                        // Special handling if the "..." menu itself is added dynamically after message load
+                        // This is for cases where the menu structure is complex and added later.
+                        if (node.matches(MORE_ACTIONS_BUTTON_SELECTOR) || node.querySelector(MORE_ACTIONS_BUTTON_SELECTOR)) {
+                            const messageElement = node.closest(MESSAGE_SELECTOR);
+                            if (messageElement && !messageElement.querySelector('.rewind-button')) {
+                                addRewindButton(messageElement);
+                            }
                         }
-                    });
-                }
+                        if (node.matches(QUICK_ACTIONS_MENU_SELECTOR) || node.querySelector(QUICK_ACTIONS_MENU_SELECTOR)) {
+                            const messageElement = node.closest(MESSAGE_SELECTOR);
+                            if (messageElement && !messageElement.querySelector('.rewind-button')) {
+                                addRewindButton(messageElement);
+                            }
+                        }
+                    }
+                });
             });
         });
 
         observer.observe(chatContainer, { childList: true, subtree: true });
-        console.log('[RewindExt] Observer attached to #chat for new messages.');
+        console.log('[RewindExtension] Observing for new messages.');
+
+        // Also process existing messages on load
+        document.querySelectorAll(MESSAGE_SELECTOR).forEach(addRewindButton);
     }
 
     // --- Initialization ---
-    function initializeExtension() {
-        console.log('[RewindExt] Initializing SillyTavern Rewind Action Extension...');
-
-        // Add some basic styling for the button (adjust as needed)
-        const style = document.createElement('style');
-        style.textContent = `
-            .${CUSTOM_BUTTON_CLASS} {
-                /* Inherits .mes_button styles. Add specifics if needed: */
-                /* e.g., color: #yourColor; */
-            }
-            .${CUSTOM_BUTTON_CLASS} i {
-                margin-right: 5px; /* Space between icon and text */
-            }
-        `;
-        document.head.appendChild(style);
-
-        // Process messages already on the page
-        processAllMessages();
-
-        // Start observing for new messages
-        observeChatContainer();
-
-        displayNotification('Rewind Action Extension Loaded.', 'success', 2000);
-        console.log('[RewindExt] Extension loaded and observing chat.');
-    }
-
-    // Wait for SillyTavern's core components to be ready.
-    // A simple check for `chat` array and `deleteMessage` function.
-    // More robust checks might involve specific ST events or elements.
-    function waitForSillyTavern(callback) {
-        const maxRetries = 60; // Try for ~30 seconds
-        let retries = 0;
-        const interval = setInterval(() => {
-            if (typeof chat !== 'undefined' && typeof deleteMessage === 'function' && typeof saveChat === 'function' && document.getElementById('chat') && document.querySelector('#chat .mes .mes_buttons')) {
-                clearInterval(interval);
-                callback();
-            } else {
-                retries++;
-                if (retries >= maxRetries) {
-                    clearInterval(interval);
-                    console.error('[RewindExt] SillyTavern did not initialize in time or key elements/functions are missing. Extension might not work correctly.');
-                    displayNotification('Error: SillyTavern not fully loaded. Rewind extension may be non-functional.', 'error', 6000);
-                }
-            }
-        }, 500);
-    }
-
-    // --- Entry Point ---
-    // Ensure DOM is ready before trying to access elements
+    // Wait for the DOM to be fully loaded before trying to find elements.
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => waitForSillyTavern(initializeExtension));
+        document.addEventListener('DOMContentLoaded', () => {
+            confirmationModal = createConfirmationModal(); // Pre-create modal
+            observeMessages();
+        });
     } else {
-        waitForSillyTavern(initializeExtension);
+        confirmationModal = createConfirmationModal(); // Pre-create modal
+        observeMessages();
     }
+
+    console.log('[RewindExtension] Loaded successfully.');
 
 })();
