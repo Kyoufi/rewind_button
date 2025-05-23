@@ -4,6 +4,7 @@
   "requires": [],
   "optional": [],
   "js": "index.js",
+  "css": "styles.css",
   "author": "Kyoufi",
   "auto_update": false
 }
