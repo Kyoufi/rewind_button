@@ -1,0 +1,9 @@
+{
+  "display_name": "Rewind Button",
+  "loading_order": 2,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "author": "Kyoufi",
+  "auto_update": false
+}
