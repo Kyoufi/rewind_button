@@ -1,67 +1,53 @@
-// ==UserScript==
-// @name         Rewind Button for Silly Tavern
-// @version      1.0
-// @description  Adds a Rewind button to remove all messages after a chosen one
-// @match        *://localhost:*/*
-// @grant        none
-// ==/UserScript==
-
 (function () {
-    'use strict';
-
-    const REWIND_BUTTON_CLASS = 'rewind-button';
-
-    function addRewindButtons() {
-        const messages = document.querySelectorAll('.mes');
-
-        messages.forEach((msg, index) => {
-            if (msg.querySelector(`.${REWIND_BUTTON_CLASS}`)) return; // Already has button
+    const addRewindButtons = () => {
+        document.querySelectorAll('.mes').forEach((messageElement) => {
+            if (messageElement.querySelector('.rewind-button')) return;
 
             const btn = document.createElement('button');
             btn.innerText = '⏪ Rewind';
-            btn.className = REWIND_BUTTON_CLASS;
+            btn.className = 'rewind-button';
             btn.style.marginLeft = '10px';
             btn.style.fontSize = '0.8em';
-            btn.onclick = () => confirmAndRewind(index);
 
-            const menu = msg.querySelector('.mes_buttons') || msg; // fallback if custom theme
-            menu.appendChild(btn);
+            btn.onclick = () => {
+                const confirmRewind = confirm('Are you sure you want to rewind to this point? This will delete all messages below this one.');
+                if (!confirmRewind) return;
+
+                const allMessages = Array.from(document.querySelectorAll('.mes'));
+                const index = allMessages.indexOf(messageElement);
+
+                if (index >= 0) {
+                    for (let i = allMessages.length - 1; i > index; i--) {
+                        const msg = allMessages[i];
+                        msg.remove();
+
+                        // If messages are also tracked in JS memory:
+                        if (typeof chat !== 'undefined' && Array.isArray(chat)) {
+                            chat.splice(i, 1);
+                        }
+                    }
+                }
+            };
+
+            const messageButtons = messageElement.querySelector('.mes-buttons');
+            if (messageButtons) {
+                messageButtons.appendChild(btn);
+            } else {
+                // Fallback if .mes-buttons doesn't exist
+                messageElement.appendChild(btn);
+            }
         });
-    }
+    };
 
-    function confirmAndRewind(index) {
-        if (!confirm('Are you sure you want to rewind to this point? This will remove all messages after it.')) {
-            return;
-        }
-
-        const allMessages = Array.from(document.querySelectorAll('.mes'));
-
-        for (let i = allMessages.length - 1; i > index; i--) {
-            allMessages[i].remove();
-        }
-
-        // Optional: Update internal memory or regenerate state if needed
-    }
-
-    function observeMessages() {
-        const chatContainer = document.querySelector('#chat');
-        if (!chatContainer) return;
-
-        const observer = new MutationObserver(() => {
-            addRewindButtons();
-        });
-
-        observer.observe(chatContainer, {
-            childList: true,
-            subtree: true,
-        });
-
-        // Initial call
+    // Observe changes to re-add buttons on new messages
+    const observer = new MutationObserver(() => {
         addRewindButtons();
-    }
-
-    // Wait for page to load fully
-    window.addEventListener('load', () => {
-        setTimeout(observeMessages, 1000);
     });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Initial injection
+    addRewindButtons();
+
+    console.log('Rewind Button extension loaded.');
 })();
